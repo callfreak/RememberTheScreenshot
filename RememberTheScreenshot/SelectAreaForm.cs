@@ -1,15 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.Drawing.Imaging;
-using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.Window;
 
 namespace RememberTheScreenshot
 {
@@ -26,14 +19,16 @@ namespace RememberTheScreenshot
             HTBOTTOMLEFT = 16,
             HTBOTTOMRIGHT = 17;
 
-        const int BORDER_THICKNESS = 10;
+        const int BORDER_THICKNESS = 4;
         #endregion
 
         #region Resize Rectangles
+#pragma warning disable CS0108 // Element blendet vererbte Element aus; fehlendes 'new'-Schlüsselwort
         Rectangle Top { get { return new Rectangle(0, 0, this.ClientSize.Width, BORDER_THICKNESS); } }
         Rectangle Left { get { return new Rectangle(0, 0, BORDER_THICKNESS, this.ClientSize.Height); } }
         Rectangle Bottom { get { return new Rectangle(0, this.ClientSize.Height - BORDER_THICKNESS, this.ClientSize.Width, BORDER_THICKNESS); } }
         Rectangle Right { get { return new Rectangle(this.ClientSize.Width - BORDER_THICKNESS, 0, BORDER_THICKNESS, this.ClientSize.Height); } }
+#pragma warning restore CS0108 // Element blendet vererbte Element aus; fehlendes 'new'-Schlüsselwort
 
         Rectangle TopLeft { get { return new Rectangle(0, 0, BORDER_THICKNESS, BORDER_THICKNESS); } }
         Rectangle TopRight { get { return new Rectangle(this.ClientSize.Width - BORDER_THICKNESS, 0, BORDER_THICKNESS, BORDER_THICKNESS); } }
@@ -44,12 +39,53 @@ namespace RememberTheScreenshot
         #region Dragging Imports
         public const int WM_NCLBUTTONDOWN = 0xA1;
 
+        public const int HTCAPTION = 0x2;
+
+        [DllImport("User32.dll")]
+        public static extern bool ReleaseCapture();
+
+        [DllImport("User32.dll")]
+        public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+        #endregion
+
+        private void panelDrag_Resize(object sender, EventArgs e)
+        {
+            LblAreaSize.Text = $"{this.Width} x {this.Height}\n" +
+                $"Strg -> Aspect Ratio 16:9\n" +
+                $"Shift -> 1:1\n" +
+                $"Esc -> Close";
+        }
+
+        public SelectAreaForm()
+        {
+            InitializeComponent();
+
+            // make trasparent
+            this.Opacity = .5D; 
+            this.DoubleBuffered = true;
+
+            // this is to avoid visual artifacts
+            this.SetStyle(ControlStyles.ResizeRedraw, true);
+
+            // change cursor to move
+            this.panelDrag.Cursor = Cursors.SizeAll; 
+
+            this.Resize += SelectAreaForm_Resize;
+            this.KeyPreview = true;
+            this.KeyDown += SelectAreaForm_KeyDown;
+        }
+
+        private void SelectAreaForm_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Escape)
+            {
+                this.Close();
+            }
+        }
+
         // TODO: Captured Size end width/height - Border thickness
         // TODO: Minimum Size
-        // TODO: Aspect Ratio Lock (Shift key)
-        // TODO: Show dimensions while resizing
         // TODO: Remember last position and size
-
         private void btnCapture_Click(object sender, EventArgs e)
         {
             // take screenshot of selected area (DPI-aware when app manifest sets PerMonitorV2)
@@ -75,9 +111,9 @@ namespace RememberTheScreenshot
                 {
                     switch (sfd.FilterIndex)
                     {
-                        case 1: bitmap.Save(sfd.FileName, System.Drawing.Imaging.ImageFormat.Png); break;
-                        case 2: bitmap.Save(sfd.FileName, System.Drawing.Imaging.ImageFormat.Jpeg); break;
-                        case 3: bitmap.Save(sfd.FileName, System.Drawing.Imaging.ImageFormat.Bmp); break;
+                        case 1: bitmap.Save(sfd.FileName, ImageFormat.Png); break;
+                        case 2: bitmap.Save(sfd.FileName, ImageFormat.Jpeg); break;
+                        case 3: bitmap.Save(sfd.FileName, ImageFormat.Bmp); break;
                     }
                 }
             }
@@ -85,24 +121,37 @@ namespace RememberTheScreenshot
             this.Show();
         }
 
-        public const int HTCAPTION = 0x2;
-
-        [DllImport("User32.dll")]
-        public static extern bool ReleaseCapture();
-
-        [DllImport("User32.dll")]
-        public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
-        #endregion
-
-        public SelectAreaForm()
+        private void SelectAreaForm_Resize(object sender, EventArgs e)
         {
-            InitializeComponent();
+            // Save the aspect ratio on resize start
+            //aspectRatio = (double)this.Width / this.Height;
 
-            this.Opacity = .5D; // make trasparent
-            this.DoubleBuffered = true;
-            this.SetStyle(ControlStyles.ResizeRedraw, true); // this is to avoid visual artifacts
+            // Check for modifier keys
+            if ((ModifierKeys & Keys.Control) == Keys.Control)
+            {
+                // 16:9 Ratio
+                double aspectRatio = 16.0 / 9.0;
+                int newWidth = this.Width;
+                int newHeight = (int)(newWidth / aspectRatio);
 
-            this.panelDrag.Cursor = Cursors.SizeAll; // change cursor to move
+                this.Resize -= SelectAreaForm_Resize;
+                this.Size = new Size(newWidth, newHeight);
+                this.Resize += SelectAreaForm_Resize;
+            }
+            else if ((ModifierKeys & Keys.Shift) == Keys.Shift)
+            {
+                // 1:1 Ratio
+                int side = Math.Min(this.Width, this.Height);
+
+                this.Resize -= SelectAreaForm_Resize;
+                this.Size = new Size(side, side);
+                this.Resize += SelectAreaForm_Resize;
+            }
+            else
+            {
+                // Frei skalierbar
+            }
+
         }
 
         private void panelDrag_MouseDown(object sender, MouseEventArgs e)
@@ -114,12 +163,12 @@ namespace RememberTheScreenshot
             }
         }
 
-        protected override void OnPaint(PaintEventArgs e) // you can safely omit this method if you want
+        protected override void OnPaint(PaintEventArgs e)
         {
-            e.Graphics.FillRectangle(Brushes.Green, Top);
-            e.Graphics.FillRectangle(Brushes.Green, Left);
-            e.Graphics.FillRectangle(Brushes.Green, Right);
-            e.Graphics.FillRectangle(Brushes.Green, Bottom);
+            e.Graphics.FillRectangle(Brushes.Orange, Top);
+            e.Graphics.FillRectangle(Brushes.Orange, Left);
+            e.Graphics.FillRectangle(Brushes.Orange, Right);
+            e.Graphics.FillRectangle(Brushes.Orange, Bottom);
         }
 
         protected override void WndProc(ref Message message)
